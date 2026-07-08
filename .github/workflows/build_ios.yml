@@ -30,6 +30,30 @@ jobs:
       - name: Install Flutter packages
         run: flutter pub get
 
+      - name: Patch device_info_plus iOS Vision selector
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
+          files = list(cache.glob("device_info_plus-*/ios/device_info_plus/Sources/device_info_plus/FPPDeviceInfoPlusPlugin.m"))
+          if not files:
+              raise SystemExit("device_info_plus iOS source file was not found")
+
+          needle = """    if (@available(iOS 26.1, *)) {
+              isiOSAppOnVision = [NSNumber numberWithBool:[info isiOSAppOnVision]];
+            }
+          """
+
+          for path in files:
+              text = path.read_text()
+              if needle in text:
+                  path.write_text(text.replace(needle, ""))
+                  print(f"Patched {path}")
+              else:
+                  print(f"No Vision selector patch needed for {path}")
+          PY
+
       - name: Run tests
         run: flutter test
 
