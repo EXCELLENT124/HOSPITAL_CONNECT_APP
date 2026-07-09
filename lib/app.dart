@@ -974,6 +974,16 @@ class _HomeScreenState extends State<HomeScreen> {
       labels.add('Admin');
       icons.add(Icons.admin_panel_settings_outlined);
     }
+    final mobileLabels = labels
+        .map((label) => switch (label) {
+              'Overview' => 'Home',
+              'Operations' => 'Ops',
+              'RAF cases' => 'Cases',
+              'My RAF case' => 'Case',
+              'Messages' => 'Msgs',
+              _ => label,
+            })
+        .toList();
     return Scaffold(
         body: SafeArea(
             child: Row(children: [
@@ -991,7 +1001,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icon(icons[i]), label: Text(labels[i])))),
           Expanded(
               child: Column(children: [
-            Header(widget.store),
+            ResponsiveHeader(widget.store),
             Expanded(
                 child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
@@ -1000,13 +1010,18 @@ class _HomeScreenState extends State<HomeScreen> {
         ])),
         bottomNavigationBar: wide
             ? null
-            : NavigationBar(
-                selectedIndex: index,
-                onDestinationSelected: (v) => setState(() => index = v),
-                destinations: List.generate(
-                    labels.length,
-                    (i) => NavigationDestination(
-                        icon: Icon(icons[i]), label: labels[i]))),
+            : NavigationBarTheme(
+                data: const NavigationBarThemeData(
+                    labelTextStyle: WidgetStatePropertyAll(
+                        TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                    iconTheme: WidgetStatePropertyAll(IconThemeData(size: 24))),
+                child: NavigationBar(
+                    selectedIndex: index,
+                    onDestinationSelected: (v) => setState(() => index = v),
+                    destinations: List.generate(
+                        labels.length,
+                        (i) => NavigationDestination(
+                            icon: Icon(icons[i]), label: mobileLabels[i])))),
         floatingActionButton: widget.store.profile!.role == UserRole.hospital
             ? FloatingActionButton.extended(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(
@@ -1015,6 +1030,116 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: const Text('New RAF case'))
             : null);
   }
+}
+
+class ResponsiveHeader extends StatelessWidget {
+  const ResponsiveHeader(this.store, {super.key});
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = MediaQuery.sizeOf(context).width < 700;
+    final actions = _actions(context);
+    final title = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Health Connect',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 2),
+      Text(_statusText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.grey, fontSize: 13))
+    ]);
+
+    return Padding(
+        padding: EdgeInsets.fromLTRB(22, mobile ? 10 : 12, 18, 8),
+        child: mobile
+            ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [Expanded(child: title), actions.last]),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: actions.take(actions.length - 1).toList()))
+              ])
+            : Row(children: [Expanded(child: title), ...actions]));
+  }
+
+  String get _statusText {
+    final profile = store.profile!;
+    final role = profile.role == UserRole.admin ? 'admin' : profile.role.name;
+    final status = profile.verified ? 'verified' : 'pending verification';
+    return '${profile.organisation} · $role · $status';
+  }
+
+  List<Widget> _actions(BuildContext context) => [
+        Badge(
+            label: Text('${store.notices.length}'),
+            child: IconButton(
+                onPressed: () => showModalBottomSheet(
+                    context: context, builder: (_) => Notices(store)),
+                icon: const Icon(Icons.notifications_outlined))),
+        if (BackendConfig.enabled)
+          IconButton(
+              tooltip: 'Sync latest data',
+              onPressed: store.syncing
+                  ? null
+                  : () async {
+                      try {
+                        await store.refreshRemote();
+                      } catch (error) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Could not sync: $error')));
+                        }
+                      }
+                    },
+              icon: store.syncing
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.sync_rounded)),
+        PopupMenuButton<Palette>(
+            icon: const Icon(Icons.palette_outlined),
+            onSelected: (v) => store.theme(value: v),
+            itemBuilder: (_) => const [
+                  PopupMenuItem(
+                      value: Palette.ocean, child: Text('Ocean teal')),
+                  PopupMenuItem(
+                      value: Palette.coral, child: Text('Sunrise coral')),
+                  PopupMenuItem(
+                      value: Palette.violet, child: Text('Ubuntu violet'))
+                ]),
+        IconButton(
+            onPressed: () => store.theme(isDark: !store.dark),
+            icon:
+                Icon(store.dark ? Icons.light_mode : Icons.dark_mode_outlined)),
+        IconButton(
+            tooltip: store.privacyShield
+                ? 'Reveal patient identities'
+                : 'Mask patient identities',
+            onPressed: store.togglePrivacyShield,
+            icon: Icon(store.privacyShield
+                ? Icons.visibility_off
+                : Icons.privacy_tip_outlined),
+            color: store.privacyShield
+                ? Theme.of(context).colorScheme.primary
+                : null),
+        PopupMenuButton(
+            icon: CircleAvatar(
+                child: Text(store.profile!.name.substring(0, 1).toUpperCase())),
+            itemBuilder: (_) => [
+                  PopupMenuItem(
+                      onTap: store.signOut,
+                      child: const Row(children: [
+                        Icon(Icons.logout),
+                        SizedBox(width: 10),
+                        Text('Sign out')
+                      ]))
+                ]),
+      ];
 }
 
 class Header extends StatelessWidget {
