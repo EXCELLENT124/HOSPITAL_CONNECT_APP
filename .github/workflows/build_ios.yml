@@ -40,18 +40,22 @@ jobs:
           if not files:
               raise SystemExit("device_info_plus iOS source file was not found")
 
-          needle = """    if (@available(iOS 26.1, *)) {
-              isiOSAppOnVision = [NSNumber numberWithBool:[info isiOSAppOnVision]];
-            }
-          """
-
           for path in files:
-              text = path.read_text()
-              if needle in text:
-                  path.write_text(text.replace(needle, ""))
-                  print(f"Patched {path}")
+              lines = path.read_text().splitlines()
+              patched = []
+              changed = False
+              for line in lines:
+                  if "[info isiOSAppOnVision]" in line:
+                      indent = line[: len(line) - len(line.lstrip())]
+                      patched.append(f"{indent}isiOSAppOnVision = [NSNumber numberWithBool:NO];")
+                      changed = True
+                  else:
+                      patched.append(line)
+              if changed:
+                  path.write_text("\n".join(patched) + "\n")
+                  print(f"Patched unsupported isiOSAppOnVision selector in {path}")
               else:
-                  print(f"No Vision selector patch needed for {path}")
+                  print(f"No isiOSAppOnVision selector found in {path}")
           PY
 
       - name: Run tests
