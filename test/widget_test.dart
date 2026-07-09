@@ -11,10 +11,13 @@ void main() {
         greaterThan(store.match(remote, 'Johannesburg')));
   });
 
-  testWidgets('shows secure role-based sign in', (tester) async {
+  testWidgets('shows secure automatic sign in', (tester) async {
     await tester.pumpWidget(MaterialApp(home: AuthScreen(AppStore())));
     expect(find.text('Welcome back'), findsOneWidget);
-    expect(find.text('Hospital'), findsOneWidget);
-    expect(find.text('Lawyer'), findsOneWidget);
+    expect(find.text('Hospital'), findsNothing);
+    expect(find.text('Lawyer'), findsNothing);
+    expect(find.text('Patient'), findsNothing);
+    expect(find.text('Admin'), findsNothing);
+    expect(find.text('Sign in'), findsOneWidget);
   });
 }

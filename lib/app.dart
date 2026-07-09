@@ -310,33 +310,20 @@ class AppStore extends ChangeNotifier {
         }));
   }
 
-  Future<void> signIn(String email, String password, UserRole role) async {
+  Future<void> signIn(String email, String password) async {
     if (BackendConfig.enabled) {
       await SupabaseService.signIn(email: email, password: password);
-      await loadRemote(roleFallback: role);
-      if (role == UserRole.admin && profile?.platformAdmin != true) {
-        await SupabaseService.signOut();
-        profile = null;
-        throw Exception('This account is not an approved administrator.');
-      }
+      await loadRemote(roleFallback: UserRole.hospital);
       notices.insert(0, 'Signed in securely as ${profile!.organisation}');
       await persist();
       notifyListeners();
       return;
     }
     profile = Profile(
-        name: role == UserRole.hospital
-            ? 'Nomsa Mthembu'
-            : role == UserRole.patient
-                ? 'Patient User'
-                : 'Naledi Jacobs',
+        name: 'Demo Hospital User',
         email: email,
-        role: role,
-        organisation: role == UserRole.hospital
-            ? 'Ubuntu Regional Hospital'
-            : role == UserRole.patient
-                ? 'Patient account'
-                : 'Jacobs Legal Care',
+        role: UserRole.hospital,
+        organisation: 'Ubuntu Regional Hospital',
         city: 'Johannesburg');
     notices.insert(0, 'Signed in securely as ${profile!.organisation}');
     await persist();
@@ -532,9 +519,8 @@ class AppStore extends ChangeNotifier {
     final organisation = await SupabaseService.currentOrganisation();
     if (organisation != null) {
       final isAdmin = organisation['is_platform_admin'] as bool? ?? false;
-      final roleName = isAdmin && roleFallback == UserRole.admin
-          ? 'admin'
-          : organisation['type'] as String? ?? roleFallback.name;
+      final roleName =
+          isAdmin ? 'admin' : organisation['type'] as String? ?? roleFallback.name;
       profile = Profile(
         name: (organisation['display_name'] as String?) ??
             fallback?.name ??
@@ -750,33 +736,28 @@ class _AuthScreenState extends State<AuthScreen> {
                                             : 'Secure access for hospitals, patients and legal teams.',
                                         style: const TextStyle(
                                             color: Colors.grey)),
-                                    const SizedBox(height: 20),
-                                    SegmentedButton<UserRole>(
-                                        segments: [
-                                          const ButtonSegment(
-                                              value: UserRole.hospital,
-                                              icon: Icon(Icons.local_hospital),
-                                              label: Text('Hospital')),
-                                          const ButtonSegment(
-                                              value: UserRole.lawyer,
-                                              icon: Icon(Icons.balance),
-                                              label: Text('Lawyer')),
-                                          const ButtonSegment(
-                                              value: UserRole.patient,
-                                              icon: Icon(Icons.person),
-                                              label: Text('Patient')),
-                                          if (!register)
-                                            const ButtonSegment(
-                                                value: UserRole.admin,
-                                                icon: Icon(
-                                                    Icons.admin_panel_settings),
-                                                label: Text('Admin'))
-                                        ],
-                                        selected: {
-                                          role
-                                        },
-                                        onSelectionChanged: (s) =>
-                                            setState(() => role = s.first)),
+                                    if (register) ...[
+                                      const SizedBox(height: 20),
+                                      SegmentedButton<UserRole>(
+                                          segments: const [
+                                            ButtonSegment(
+                                                value: UserRole.hospital,
+                                                icon:
+                                                    Icon(Icons.local_hospital),
+                                                label: Text('Hospital')),
+                                            ButtonSegment(
+                                                value: UserRole.lawyer,
+                                                icon: Icon(Icons.balance),
+                                                label: Text('Lawyer')),
+                                            ButtonSegment(
+                                                value: UserRole.patient,
+                                                icon: Icon(Icons.person),
+                                                label: Text('Patient')),
+                                          ],
+                                          selected: {role},
+                                          onSelectionChanged: (s) =>
+                                              setState(() => role = s.first)),
+                                    ],
                                     if (register) ...[
                                       const SizedBox(height: 14),
                                       TextFormField(
@@ -922,7 +903,7 @@ class _AuthScreenState extends State<AuthScreen> {
         }
       } else {
         await widget.store
-            .signIn(email.text.trim(), password.text, role)
+            .signIn(email.text.trim(), password.text)
             .timeout(const Duration(seconds: 25));
       }
     } catch (error) {
