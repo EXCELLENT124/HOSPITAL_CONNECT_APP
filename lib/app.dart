@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'backend_config.dart';
 import 'supabase_service.dart';
@@ -262,31 +264,30 @@ class AppStore extends ChangeNotifier {
   ];
 
   Future<void> initialise() async {
-    final raw = await storage.read(key: 'health_connect_state');
+    final authEmail = BackendConfig.enabled
+        ? SupabaseService.client.auth.currentUser?.email
+        : null;
+    final raw = await storage.read(key: _stateKeyForEmail(authEmail));
     if (raw != null) {
       try {
-        final j = jsonDecode(raw);
-        if (j['profile'] != null) profile = Profile.fromJson(j['profile']);
-        cases.addAll(
-            (j['cases'] as List? ?? []).map((e) => RafCase.fromJson(e)));
-        notices.addAll(List<String>.from(j['notices'] ?? []));
-        followUps.addAll((j['followUps'] as Map<String, dynamic>? ?? {}).map(
-            (key, value) => MapEntry(key, DateTime.parse(value as String))));
-        completedEvidence.addAll(
-            (j['completedEvidence'] as Map<String, dynamic>? ?? {}).map(
-                (key, value) =>
-                    MapEntry(key, Set<String>.from(value as List))));
-        palette = Palette.values.byName(j['palette'] ?? 'ocean');
-        dark = j['dark'] ?? false;
-        privacyShield = j['privacyShield'] ?? false;
+        restoreFromJson(jsonDecode(raw));
       } catch (_) {
-        await storage.delete(key: 'health_connect_state');
+        await storage.delete(key: _stateKeyForEmail(authEmail));
       }
     }
-    if (BackendConfig.enabled &&
-        SupabaseService.client.auth.currentUser != null) {
-      await loadRemote(
-          roleFallback: profile?.role ?? UserRole.hospital, fallback: profile);
+    if (BackendConfig.enabled) {
+      if (SupabaseService.client.auth.currentUser != null) {
+        await loadRemote(
+            roleFallback: profile?.role ?? UserRole.hospital,
+            fallback: profile);
+      } else {
+        profile = null;
+        cases.clear();
+        notices.clear();
+        followUps.clear();
+        completedEvidence.clear();
+        await storage.delete(key: 'health_connect_state');
+      }
     }
     ready = true;
     _refreshDueNotifications();
@@ -295,7 +296,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> persist() async {
     await storage.write(
-        key: 'health_connect_state',
+        key: _stateKeyForEmail(profile?.email),
         value: jsonEncode({
           'profile': profile?.toJson(),
           'cases': cases.map((e) => e.toJson()).toList(),
@@ -310,10 +311,67 @@ class AppStore extends ChangeNotifier {
         }));
   }
 
+  static String _stateKeyForEmail(String? email) {
+    if (!BackendConfig.enabled || (email ?? '').trim().isEmpty) {
+      return 'health_connect_state';
+    }
+    final safeEmail = email!
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+$'), '');
+    return 'health_connect_state_$safeEmail';
+  }
+
+  void restoreFromJson(Map<String, dynamic> j) {
+    profile = j['profile'] == null ? null : Profile.fromJson(j['profile']);
+    cases
+      ..clear()
+      ..addAll((j['cases'] as List? ?? []).map((e) => RafCase.fromJson(e)));
+    notices
+      ..clear()
+      ..addAll(List<String>.from(j['notices'] ?? []));
+    followUps
+      ..clear()
+      ..addAll((j['followUps'] as Map<String, dynamic>? ?? {}).map(
+          (key, value) => MapEntry(key, DateTime.parse(value as String))));
+    completedEvidence
+      ..clear()
+      ..addAll((j['completedEvidence'] as Map<String, dynamic>? ?? {}).map(
+          (key, value) => MapEntry(key, Set<String>.from(value as List))));
+    palette = Palette.values.byName(j['palette'] ?? 'ocean');
+    dark = j['dark'] ?? false;
+    privacyShield = j['privacyShield'] ?? false;
+  }
+
+  Future<void> restoreSavedStateForEmail(String email) async {
+    profile = null;
+    cases.clear();
+    notices.clear();
+    followUps.clear();
+    completedEvidence.clear();
+    final raw = await storage.read(key: _stateKeyForEmail(email));
+    if (raw == null) return;
+    try {
+      restoreFromJson(jsonDecode(raw));
+    } catch (_) {
+      await storage.delete(key: _stateKeyForEmail(email));
+    }
+  }
+
+  void clearSessionState() {
+    profile = null;
+    cases.clear();
+    notices.clear();
+    followUps.clear();
+    completedEvidence.clear();
+  }
+
   Future<void> signIn(String email, String password) async {
     if (BackendConfig.enabled) {
       await SupabaseService.signIn(email: email, password: password);
-      await loadRemote(roleFallback: UserRole.hospital);
+      await restoreSavedStateForEmail(email);
+      await loadRemote(roleFallback: profile?.role ?? UserRole.hospital);
       notices.insert(0, 'Signed in securely as ${profile!.organisation}');
       await persist();
       notifyListeners();
@@ -339,6 +397,7 @@ class AppStore extends ChangeNotifier {
           role: value.role.name,
           organisation: value.organisation,
           city: value.city);
+      clearSessionState();
       await loadRemote(roleFallback: value.role, fallback: value);
       notices.insert(0, '${profile!.organisation} registration submitted');
       await persist();
@@ -352,9 +411,10 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    if (profile != null) await persist();
     if (BackendConfig.enabled) await SupabaseService.signOut();
-    profile = null;
-    await persist();
+    clearSessionState();
+    await storage.delete(key: 'health_connect_state');
     notifyListeners();
   }
 
@@ -372,7 +432,7 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<void> addCase(RafCase value) async {
+  Future<void> addCase(RafCase value, {String? patientPassword}) async {
     value.timeline.insert(
         0,
         TimelineEvent(
@@ -383,6 +443,15 @@ class AppStore extends ChangeNotifier {
     cases.insert(0, value);
     notices.insert(0, 'Case ${value.id} created');
     if (BackendConfig.enabled) {
+      String? patientUserId;
+      if ((patientPassword ?? '').trim().isNotEmpty &&
+          (value.patientEmail ?? '').trim().isNotEmpty) {
+        patientUserId = await SupabaseService.createPatientAccount(
+            name: value.patient,
+            email: value.patientEmail!.trim(),
+            password: patientPassword!.trim(),
+            city: value.city);
+      }
       await SupabaseService.saveCase(
           id: value.id,
           patientName: value.patient,
@@ -398,7 +467,8 @@ class AppStore extends ChangeNotifier {
           emergencyContactName: value.emergencyContactName,
           emergencyContactPhone: value.emergencyContactPhone,
           accidentDate: value.accidentDate,
-          accidentDescription: value.accidentDescription);
+          accidentDescription: value.accidentDescription,
+          patientUserId: patientUserId);
       await loadRemote(roleFallback: profile!.role);
     }
     await persist();
@@ -508,6 +578,12 @@ class AppStore extends ChangeNotifier {
     complete ? values.add(label) : values.remove(label);
     notices.insert(
         0, '$label ${complete ? 'completed' : 'reopened'} for ${item.id}');
+    await persist();
+    notifyListeners();
+  }
+
+  Future<void> clearLocalNotifications() async {
+    notices.clear();
     await persist();
     notifyListeners();
   }
@@ -632,10 +708,33 @@ class HealthConnectApp extends StatefulWidget {
 
 class _HealthConnectAppState extends State<HealthConnectApp> {
   final store = AppStore();
+  StreamSubscription<AuthState>? authSubscription;
   @override
   void initState() {
     super.initState();
     store.initialise();
+    if (BackendConfig.enabled) {
+      authSubscription =
+          SupabaseService.client.auth.onAuthStateChange.listen((data) {
+        if (data.event == AuthChangeEvent.passwordRecovery && mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            showDialog(
+                context: context,
+                builder: (_) => const ChangePasswordDialog(
+                    title: 'Reset password',
+                    intro:
+                        'Enter a new password for your Health Connect account.'));
+          });
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    authSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -693,6 +792,8 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool register = false, loading = false;
+  bool showPassword = false;
+  bool resettingPassword = false;
   UserRole role = UserRole.hospital;
   final professionalDocs = <PlatformFile>[];
   final name = TextEditingController(),
@@ -825,12 +926,39 @@ class _AuthScreenState extends State<AuthScreen> {
                                     const SizedBox(height: 12),
                                     TextFormField(
                                         controller: password,
-                                        obscureText: true,
-                                        decoration: const InputDecoration(
-                                            labelText: 'Password'),
+                                        obscureText: !showPassword,
+                                        decoration: InputDecoration(
+                                            labelText: 'Password',
+                                            suffixIcon: IconButton(
+                                                tooltip: showPassword
+                                                    ? 'Hide password'
+                                                    : 'Show password',
+                                                onPressed: () => setState(() =>
+                                                    showPassword =
+                                                        !showPassword),
+                                                icon: Icon(showPassword
+                                                    ? Icons.visibility_off
+                                                    : Icons.visibility))),
                                         validator: (v) => (v ?? '').length >= 6
                                             ? null
                                             : 'Use at least 6 characters'),
+                                    if (!register)
+                                      Align(
+                                          alignment: Alignment.centerRight,
+                                          child: TextButton.icon(
+                                              onPressed: resettingPassword
+                                                  ? null
+                                                  : sendPasswordReset,
+                                              icon: resettingPassword
+                                                  ? const SizedBox.square(
+                                                      dimension: 14,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                              strokeWidth: 2))
+                                                  : const Icon(
+                                                      Icons.lock_reset),
+                                              label: const Text(
+                                                  'Forgot password?'))),
                                     const SizedBox(height: 20),
                                     FilledButton(
                                         onPressed: loading ? null : submit,
@@ -864,6 +992,39 @@ class _AuthScreenState extends State<AuthScreen> {
                                   ]))))))));
   static String? required(String? v) =>
       (v ?? '').trim().isEmpty ? 'Required' : null;
+
+  Future<void> sendPasswordReset() async {
+    final targetEmail = email.text.trim();
+    if (!targetEmail.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Enter your email first, then tap Forgot password.')));
+      return;
+    }
+    if (!BackendConfig.enabled) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Password reset email works when Supabase is connected.')));
+      return;
+    }
+    setState(() => resettingPassword = true);
+    try {
+      await SupabaseService.sendPasswordResetEmail(targetEmail)
+          .timeout(const Duration(seconds: 25));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Password reset email sent to $targetEmail.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not send reset email: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => resettingPassword = false);
+    }
+  }
+
   Future<void> pickProfessionalDocs() async {
     final result = await FilePicker.platform
         .pickFiles(allowMultiple: true, withData: BackendConfig.enabled);
@@ -1079,7 +1240,10 @@ class ResponsiveHeader extends StatelessWidget {
             label: Text('${store.notices.length}'),
             child: IconButton(
                 onPressed: () => showModalBottomSheet(
-                    context: context, builder: (_) => Notices(store)),
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+                    builder: (_) => Notices(store)),
                 icon: const Icon(Icons.notifications_outlined))),
         if (BackendConfig.enabled)
           IconButton(
@@ -1132,6 +1296,15 @@ class ResponsiveHeader extends StatelessWidget {
                 child: Text(store.profile!.name.substring(0, 1).toUpperCase())),
             itemBuilder: (_) => [
                   PopupMenuItem(
+                      onTap: () => Future.microtask(() => showDialog(
+                          context: context,
+                          builder: (_) => const ChangePasswordDialog())),
+                      child: const Row(children: [
+                        Icon(Icons.lock_reset),
+                        SizedBox(width: 10),
+                        Text('Change password')
+                      ])),
+                  PopupMenuItem(
                       onTap: store.signOut,
                       child: const Row(children: [
                         Icon(Icons.logout),
@@ -1162,7 +1335,10 @@ class Header extends StatelessWidget {
             label: Text('${store.notices.length}'),
             child: IconButton(
                 onPressed: () => showModalBottomSheet(
-                    context: context, builder: (_) => Notices(store)),
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+                    builder: (_) => Notices(store)),
                 icon: const Icon(Icons.notifications_outlined))),
         if (BackendConfig.enabled)
           IconButton(
@@ -1225,6 +1401,100 @@ class Header extends StatelessWidget {
       ]));
 }
 
+class ChangePasswordDialog extends StatefulWidget {
+  const ChangePasswordDialog(
+      {super.key, this.title = 'Change password', this.intro});
+  final String title;
+  final String? intro;
+
+  @override
+  State<ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
+  final form = GlobalKey<FormState>();
+  final password = TextEditingController();
+  final confirm = TextEditingController();
+  bool showPassword = false;
+  bool saving = false;
+
+  @override
+  void dispose() {
+    password.dispose();
+    confirm.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+      title: Text(widget.title),
+      content: Form(
+          key: form,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (widget.intro != null) ...[
+              Text(widget.intro!),
+              const SizedBox(height: 12),
+            ],
+            TextFormField(
+                controller: password,
+                obscureText: !showPassword,
+                decoration: InputDecoration(
+                    labelText: 'New password',
+                    suffixIcon: IconButton(
+                        tooltip:
+                            showPassword ? 'Hide password' : 'Show password',
+                        onPressed: () =>
+                            setState(() => showPassword = !showPassword),
+                        icon: Icon(showPassword
+                            ? Icons.visibility_off
+                            : Icons.visibility))),
+                validator: (value) => (value ?? '').length >= 6
+                    ? null
+                    : 'Use at least 6 characters'),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: confirm,
+                obscureText: !showPassword,
+                decoration:
+                    const InputDecoration(labelText: 'Confirm new password'),
+                validator: (value) =>
+                    value == password.text ? null : 'Passwords do not match')
+          ])),
+      actions: [
+        TextButton(
+            onPressed: saving ? null : () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        FilledButton.icon(
+            onPressed: saving ? null : save,
+            icon: saving
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.save),
+            label: const Text('Update password'))
+      ]);
+
+  Future<void> save() async {
+    if (!form.currentState!.validate()) return;
+    setState(() => saving = true);
+    try {
+      await SupabaseService.updateCurrentUserPassword(password.text.trim());
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Password updated successfully.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not update password: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+}
+
 class Dashboard extends StatelessWidget {
   const Dashboard(this.store, {super.key});
   final AppStore store;
@@ -1232,6 +1502,10 @@ class Dashboard extends StatelessWidget {
   Widget build(BuildContext context) =>
       AppList(key: const ValueKey('dashboard'), children: [
         Welcome(store.profile!),
+        if (store.profile!.role == UserRole.patient) ...[
+          const SizedBox(height: 12),
+          PatientPortalBanner(store),
+        ],
         const SizedBox(height: 16),
         Wrap(spacing: 12, runSpacing: 12, children: [
           Metric(Icons.folder_open, '${store.cases.length}', 'Active cases'),
@@ -1265,6 +1539,39 @@ class Dashboard extends StatelessWidget {
             leading: const CircleAvatar(child: Icon(Icons.notifications_none)),
             title: Text(e))),
       ]);
+}
+
+class PatientPortalBanner extends StatelessWidget {
+  const PatientPortalBanner(this.store, {super.key});
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme;
+    final active = store.cases.isEmpty ? null : store.cases.first;
+    return Card(
+        child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(children: [
+              CircleAvatar(
+                  radius: 28,
+                  backgroundColor: c.secondaryContainer,
+                  child: Icon(Icons.person_outline,
+                      color: c.onSecondaryContainer)),
+              const SizedBox(width: 14),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    const Text('Patient case portal',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w900)),
+                    Text(active == null
+                        ? 'Your RAF case will appear here once the hospital links your email.'
+                        : 'Your case ${active.id} is currently at: ${active.status}.')
+                  ]))
+            ])));
+  }
 }
 
 class OperationsPage extends StatelessWidget {
@@ -1559,9 +1866,16 @@ class Welcome extends StatelessWidget {
                         fontWeight: FontWeight.w900)),
                 const SizedBox(height: 6),
                 Text(
-                    profile.role == UserRole.hospital
-                        ? 'Coordinate RAF care and legal referrals in one place.'
-                        : 'Review referrals and support your clients securely.',
+                    switch (profile.role) {
+                      UserRole.hospital =>
+                        'Coordinate RAF care and legal referrals in one place.',
+                      UserRole.lawyer =>
+                        'Review referrals and support your clients securely.',
+                      UserRole.patient =>
+                        'Track your RAF case, documents and messages safely.',
+                      UserRole.admin =>
+                        'Approve trusted users and keep the platform safe.',
+                    },
                     style: TextStyle(color: c.onPrimary.withValues(alpha: .85)))
               ])),
           const BrandMark(size: 82, translucent: true)
@@ -1688,6 +2002,9 @@ class CaseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final urgencyColor = _urgencyColor(item.urgency);
+    final markerColor = store.profile?.role == UserRole.patient
+        ? Theme.of(context).colorScheme.primaryContainer
+        : urgencyColor;
     return Card(
         child: InkWell(
             borderRadius: BorderRadius.circular(22),
@@ -1700,7 +2017,7 @@ class CaseCard extends StatelessWidget {
                       width: 9,
                       height: 55,
                       decoration: BoxDecoration(
-                          color: urgencyColor,
+                          color: markerColor,
                           borderRadius: BorderRadius.circular(8))),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1708,14 +2025,20 @@ class CaseCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                         Text(store.patientLabel(item.patient),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w900)),
                         Text('${item.id} · ${item.city}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: Colors.grey)),
                         Text(item.lawyer ?? 'No lawyer assigned',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 12)),
                         const SizedBox(height: 8),
-                        Row(children: [
+                        Wrap(spacing: 10, runSpacing: 6, children: [
                           Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
@@ -1727,21 +2050,23 @@ class CaseCard extends StatelessWidget {
                                       color: urgencyColor,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800))),
-                          const SizedBox(width: 10),
                           Text('${item.readiness}% ready',
                               style: const TextStyle(
                                   fontSize: 11, fontWeight: FontWeight.w700))
                         ])
                       ])),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    Chip(label: Text(item.status)),
+                  Flexible(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                    FittedBox(child: Chip(label: Text(item.status))),
                     SizedBox(
                         width: 92,
                         child: LinearProgressIndicator(
                             value: item.readiness / 100,
                             color: urgencyColor,
                             borderRadius: BorderRadius.circular(8)))
-                  ]),
+                  ])),
                   const Icon(Icons.chevron_right)
                 ]))));
   }
@@ -3109,6 +3434,7 @@ class _CaseFormPageState extends State<CaseFormPage> {
   final form = GlobalKey<FormState>();
   final patient = TextEditingController();
   final patientEmail = TextEditingController();
+  final patientPassword = TextEditingController();
   final patientPhone = TextEditingController();
   final patientIdNumber = TextEditingController();
   final patientAddress = TextEditingController();
@@ -3120,6 +3446,7 @@ class _CaseFormPageState extends State<CaseFormPage> {
   DateTime? accidentDate;
   bool recommend = true;
   bool saving = false;
+  bool showPatientPassword = false;
 
   bool get editing => widget.existing != null;
 
@@ -3150,6 +3477,7 @@ class _CaseFormPageState extends State<CaseFormPage> {
   void dispose() {
     patient.dispose();
     patientEmail.dispose();
+    patientPassword.dispose();
     patientPhone.dispose();
     patientIdNumber.dispose();
     patientAddress.dispose();
@@ -3196,6 +3524,27 @@ class _CaseFormPageState extends State<CaseFormPage> {
                                           labelText:
                                               'Patient email for patient login'),
                                       validator: emailRequired)),
+                              if (!editing)
+                                FormBox(
+                                    child: TextFormField(
+                                        controller: patientPassword,
+                                        obscureText: !showPatientPassword,
+                                        decoration: InputDecoration(
+                                            labelText:
+                                                'Temporary patient password',
+                                            helperText:
+                                                'Give this to the patient for first login',
+                                            suffixIcon: IconButton(
+                                                tooltip: showPatientPassword
+                                                    ? 'Hide password'
+                                                    : 'Show password',
+                                                onPressed: () => setState(() =>
+                                                    showPatientPassword =
+                                                        !showPatientPassword),
+                                                icon: Icon(showPatientPassword
+                                                    ? Icons.visibility_off
+                                                    : Icons.visibility))),
+                                        validator: passwordRequired)),
                               FormBox(
                                   child: TextFormField(
                                       controller: patientPhone,
@@ -3307,6 +3656,12 @@ class _CaseFormPageState extends State<CaseFormPage> {
     return email.contains('@') ? null : 'Enter a valid email';
   }
 
+  static String? passwordRequired(String? value) {
+    final password = (value ?? '').trim();
+    if (password.isEmpty) return 'Required for patient login';
+    return password.length >= 6 ? null : 'Use at least 6 characters';
+  }
+
   Future<void> save() async {
     if (!form.currentState!.validate()) return;
     if (patientDob == null || accidentDate == null) {
@@ -3336,7 +3691,8 @@ class _CaseFormPageState extends State<CaseFormPage> {
             emergencyContactPhone: emergencyPhone.text.trim(),
             accidentDate: accidentDate,
             accidentDescription: accidentDescription.text.trim());
-        await widget.store.addCase(item);
+        await widget.store.addCase(item,
+            patientPassword: patientPassword.text.trim());
       } else {
         existing.patient = patient.text.trim();
         existing.patientEmail = patientEmail.text.trim();
@@ -3383,36 +3739,72 @@ class _NoticesState extends State<Notices> {
   }
 
   @override
-  Widget build(BuildContext context) => SafeArea(
-      child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Notifications',
-                    style:
-                        TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 10),
-                if (remote.isEmpty && widget.store.notices.isEmpty)
-                  const Text('You are all caught up.')
-                else ...[
-                  ...remote.map((notice) => ListTile(
-                      leading: Icon(notice['read_at'] == null
-                          ? Icons.notifications_active
-                          : Icons.notifications_none),
-                      title: Text(notice['title']),
-                      subtitle: Text(notice['body'] ?? ''),
-                      onTap: () async {
-                        await SupabaseService.markNotificationRead(
-                            notice['id']);
-                        await load();
-                      })),
-                  ...widget.store.notices.take(8).map((e) => ListTile(
-                      leading: const Icon(Icons.notifications_none),
-                      title: Text(e)))
-                ]
-              ])));
+  Widget build(BuildContext context) {
+    final notifications = <Widget>[
+      ...remote.map((notice) => ListTile(
+          leading: Icon(notice['read_at'] == null
+              ? Icons.notifications_active
+              : Icons.notifications_none),
+          title: Text('${notice['title']}',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: Text('${notice['body'] ?? ''}',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+          onTap: () async {
+            await SupabaseService.markNotificationRead(notice['id']);
+            await load();
+          })),
+      ...widget.store.notices.take(8).map((e) => ListTile(
+          leading: const Icon(Icons.notifications_none),
+          title: Text(e, maxLines: 2, overflow: TextOverflow.ellipsis)))
+    ];
+
+    return DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: .55,
+        minChildSize: .28,
+        maxChildSize: .90,
+        builder: (context, controller) => SafeArea(
+            top: false,
+            child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                          child: Container(
+                              width: 44,
+                              height: 5,
+                              margin: const EdgeInsets.only(bottom: 14),
+                              decoration: BoxDecoration(
+                                  color: Colors.grey.withValues(alpha: .35),
+                                  borderRadius: BorderRadius.circular(99)))),
+                      Row(children: [
+                        const Expanded(
+                            child: Text('Notifications',
+                                style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900))),
+                        if (widget.store.notices.isNotEmpty)
+                          TextButton.icon(
+                              onPressed: () async {
+                                await widget.store.clearLocalNotifications();
+                                if (mounted) setState(() {});
+                              },
+                              icon: const Icon(Icons.cleaning_services),
+                              label: const Text('Clear'))
+                      ]),
+                      const SizedBox(height: 8),
+                      Expanded(
+                          child: notifications.isEmpty
+                              ? const Center(
+                                  child: Text('You are all caught up.'))
+                              : ListView(
+                                  controller: controller,
+                                  padding:
+                                      const EdgeInsets.only(bottom: 24),
+                                  children: notifications))
+                    ]))));
+  }
 }
 
 class AppList extends StatelessWidget {

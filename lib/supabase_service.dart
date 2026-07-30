@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'backend_config.dart';
+
 class SupabaseService {
   SupabaseService._();
 
@@ -12,6 +14,50 @@ class SupabaseService {
     required String password,
   }) async {
     await client.auth.signInWithPassword(email: email, password: password);
+  }
+
+  static Future<void> sendPasswordResetEmail(String email) async {
+    await client.auth.resetPasswordForEmail(email,
+        redirectTo: BackendConfig.passwordResetRedirectUrl);
+  }
+
+  static Future<void> updateCurrentUserPassword(String password) async {
+    await client.auth.updateUser(UserAttributes(password: password));
+  }
+
+  static Future<String?> createPatientAccount({
+    required String name,
+    required String email,
+    required String password,
+    required String city,
+  }) async {
+    final currentSession = client.auth.currentSession;
+    try {
+      final response = await client.auth.signUp(
+        email: email,
+        password: password,
+        data: {
+          'name': name,
+          'account_type': 'patient',
+          'city': city,
+        },
+      );
+      return response.user?.id;
+    } on AuthException catch (error) {
+      final message = error.message.toLowerCase();
+      if (!message.contains('already') &&
+          !message.contains('registered') &&
+          !message.contains('exists')) {
+        rethrow;
+      }
+      return null;
+    } finally {
+      final refreshToken = currentSession?.refreshToken;
+      if (refreshToken != null &&
+          client.auth.currentUser?.id != currentSession!.user.id) {
+        await client.auth.setSession(refreshToken);
+      }
+    }
   }
 
   static Future<String> register({
@@ -201,6 +247,7 @@ class SupabaseService {
     String? emergencyContactPhone,
     DateTime? accidentDate,
     String? accidentDescription,
+    String? patientUserId,
   }) async {
     final user = client.auth.currentUser;
     if (user == null) return;
@@ -231,6 +278,7 @@ class SupabaseService {
         'emergency_contact_phone': emergencyContactPhone,
         'accident_date': accidentDate?.toIso8601String(),
         'accident_description': accidentDescription,
+        if (patientUserId != null) 'patient_user_id': patientUserId,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', id);
       return;
@@ -253,6 +301,7 @@ class SupabaseService {
       'emergency_contact_phone': emergencyContactPhone,
       'accident_date': accidentDate?.toIso8601String(),
       'accident_description': accidentDescription,
+      'patient_user_id': patientUserId,
       'created_by': user.id,
     });
   }
