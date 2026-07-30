@@ -827,38 +827,64 @@ class AuthRoleSelector extends StatelessWidget {
                         child: AnimatedContainer(
                             duration: const Duration(milliseconds: 180),
                             padding: EdgeInsets.symmetric(
-                                horizontal: compact ? 6 : 10,
-                                vertical: compact ? 9 : 10),
+                                horizontal: compact ? 4 : 10,
+                                vertical: compact ? 7 : 10),
                             decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(999),
                                 color: active
                                     ? scheme.primaryContainer
                                     : Colors.transparent),
-                            child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(active ? Icons.check : icon,
-                                      size: compact ? 17 : 18,
-                                      color: active
-                                          ? scheme.onPrimaryContainer
-                                          : scheme.onSurface),
-                                  SizedBox(width: compact ? 4 : 6),
-                                  Flexible(
-                                      child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(label,
-                                              maxLines: 1,
-                                              softWrap: false,
-                                              style: TextStyle(
-                                                  fontWeight: active
-                                                      ? FontWeight.w800
-                                                      : FontWeight.w700,
-                                                  color: active
-                                                      ? scheme
-                                                          .onPrimaryContainer
-                                                      : scheme.onSurface))))
-                                ])))));
+                            child: compact
+                                ? Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                        Icon(active ? Icons.check : icon,
+                                            size: 18,
+                                            color: active
+                                                ? scheme.onPrimaryContainer
+                                                : scheme.onSurface),
+                                        const SizedBox(height: 2),
+                                        FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Text(label,
+                                                maxLines: 1,
+                                                softWrap: false,
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: active
+                                                        ? FontWeight.w800
+                                                        : FontWeight.w700,
+                                                    color: active
+                                                        ? scheme
+                                                            .onPrimaryContainer
+                                                        : scheme.onSurface)))
+                                      ])
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                        Icon(active ? Icons.check : icon,
+                                            size: 18,
+                                            color: active
+                                                ? scheme.onPrimaryContainer
+                                                : scheme.onSurface),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                            child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                child: Text(label,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: TextStyle(
+                                                        fontWeight: active
+                                                            ? FontWeight.w800
+                                                            : FontWeight.w700,
+                                                        color: active
+                                                            ? scheme
+                                                                .onPrimaryContainer
+                                                            : scheme
+                                                                .onSurface))))
+                                      ])))));
           }).toList()));
     });
   }
@@ -880,28 +906,43 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget build(BuildContext context) => Scaffold(
       body: Center(
           child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(
+                  MediaQuery.sizeOf(context).width < 430 ? 14 : 24),
               child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 500),
                   child: Card(
                       child: Padding(
-                          padding: const EdgeInsets.all(28),
+                          padding: EdgeInsets.all(
+                              MediaQuery.sizeOf(context).width < 430
+                                  ? 20
+                                  : 28),
                           child: Form(
                               key: form,
                               child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    const Align(
+                                    Align(
                                         alignment: Alignment.centerLeft,
-                                        child: BrandMark(size: 64)),
+                                        child: BrandMark(
+                                            size:
+                                                MediaQuery.sizeOf(context)
+                                                            .width <
+                                                        430
+                                                    ? 60
+                                                    : 64)),
                                     const SizedBox(height: 18),
                                     Text(
                                         register
                                             ? 'Join Health Connect'
                                             : 'Welcome back',
-                                        style: const TextStyle(
-                                            fontSize: 28,
+                                        style: TextStyle(
+                                            fontSize:
+                                                MediaQuery.sizeOf(context)
+                                                            .width <
+                                                        430
+                                                    ? 26
+                                                    : 28,
                                             fontWeight: FontWeight.w900)),
                                     Text(
                                         register
