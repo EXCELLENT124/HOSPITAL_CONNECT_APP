@@ -790,6 +790,80 @@ class AuthScreen extends StatefulWidget {
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
+class AuthRoleSelector extends StatelessWidget {
+  const AuthRoleSelector(
+      {required this.selected, required this.onChanged, super.key});
+
+  final UserRole selected;
+  final ValueChanged<UserRole> onChanged;
+
+  static const _items = [
+    (UserRole.hospital, Icons.local_hospital, 'Hospital'),
+    (UserRole.lawyer, Icons.balance, 'Lawyer'),
+    (UserRole.patient, Icons.person, 'Patient'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(builder: (context, constraints) {
+      final compact = constraints.maxWidth < 360;
+      return Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: scheme.outline),
+              color: scheme.surfaceContainerHighest.withOpacity(0.35)),
+          child: Row(
+              children: _items.map((item) {
+            final (value, icon, label) = item;
+            final active = value == selected;
+            return Expanded(
+                child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: () => onChanged(value),
+                        child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: compact ? 6 : 10,
+                                vertical: compact ? 9 : 10),
+                            decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(999),
+                                color: active
+                                    ? scheme.primaryContainer
+                                    : Colors.transparent),
+                            child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(active ? Icons.check : icon,
+                                      size: compact ? 17 : 18,
+                                      color: active
+                                          ? scheme.onPrimaryContainer
+                                          : scheme.onSurface),
+                                  SizedBox(width: compact ? 4 : 6),
+                                  Flexible(
+                                      child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(label,
+                                              maxLines: 1,
+                                              softWrap: false,
+                                              style: TextStyle(
+                                                  fontWeight: active
+                                                      ? FontWeight.w800
+                                                      : FontWeight.w700,
+                                                  color: active
+                                                      ? scheme
+                                                          .onPrimaryContainer
+                                                      : scheme.onSurface))))
+                                ])))));
+          }).toList()));
+    });
+  }
+}
+
 class _AuthScreenState extends State<AuthScreen> {
   bool register = false, loading = false;
   bool showPassword = false;
@@ -839,25 +913,10 @@ class _AuthScreenState extends State<AuthScreen> {
                                             color: Colors.grey)),
                                     if (register) ...[
                                       const SizedBox(height: 20),
-                                      SegmentedButton<UserRole>(
-                                          segments: const [
-                                            ButtonSegment(
-                                                value: UserRole.hospital,
-                                                icon:
-                                                    Icon(Icons.local_hospital),
-                                                label: Text('Hospital')),
-                                            ButtonSegment(
-                                                value: UserRole.lawyer,
-                                                icon: Icon(Icons.balance),
-                                                label: Text('Lawyer')),
-                                            ButtonSegment(
-                                                value: UserRole.patient,
-                                                icon: Icon(Icons.person),
-                                                label: Text('Patient')),
-                                          ],
-                                          selected: {role},
-                                          onSelectionChanged: (s) =>
-                                              setState(() => role = s.first)),
+                                      AuthRoleSelector(
+                                          selected: role,
+                                          onChanged: (value) =>
+                                              setState(() => role = value)),
                                     ],
                                     if (register) ...[
                                       const SizedBox(height: 14),
