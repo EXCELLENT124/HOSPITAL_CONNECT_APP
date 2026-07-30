@@ -982,13 +982,6 @@ class _AuthScreenState extends State<AuthScreen> {
                                         child: Text(register
                                             ? 'Already registered? Sign in'
                                             : 'New here? Register')),
-                                    Text(
-                                        BackendConfig.enabled
-                                            ? 'Connected to Supabase secure backend.'
-                                            : 'Local demo mode. Do not use real patient data yet.',
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            fontSize: 11, color: Colors.grey)),
                                   ]))))))));
   static String? required(String? v) =>
       (v ?? '').trim().isEmpty ? 'Required' : null;
