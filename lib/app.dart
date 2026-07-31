@@ -13,6 +13,44 @@ enum UserRole { hospital, lawyer, patient, admin }
 
 enum Palette { ocean, coral, violet }
 
+class RafEvidenceItem {
+  const RafEvidenceItem(this.label, this.category, this.keywords,
+      {this.required = true});
+
+  final String label;
+  final String category;
+  final List<String> keywords;
+  final bool required;
+}
+
+const rafEvidenceItems = [
+  RafEvidenceItem('Identity document', 'Patient proof',
+      ['identity', ' id ', 'id.', 'passport', 'smart id']),
+  RafEvidenceItem('Patient consent / mandate', 'Patient proof',
+      ['consent', 'mandate', 'authority', 'authorisation', 'poa']),
+  RafEvidenceItem('Accident report / police case', 'Accident proof',
+      ['accident report', 'police', 'case number', 'saps', 'ar form']),
+  RafEvidenceItem('Accident description / statement', 'Accident proof',
+      ['statement', 'affidavit', 'description', 'crash narrative']),
+  RafEvidenceItem('Vehicle / driver details', 'Accident proof',
+      ['vehicle', 'registration', 'driver', 'licence', 'license']),
+  RafEvidenceItem('Medical records', 'Medical proof',
+      ['medical', 'hospital', 'clinical', 'doctor', 'nurse', 'file']),
+  RafEvidenceItem('Medical report', 'Medical proof',
+      ['medical report', 'doctor report', 'specialist', 'assessment']),
+  RafEvidenceItem('Serious injury / RAF 4', 'Medical proof',
+      ['raf 4', 'serious injury', 'narrative test', 'ama']),
+  RafEvidenceItem('Proof of income', 'Financial proof',
+      ['income', 'payslip', 'salary', 'employment', 'earnings', 'bank']),
+  RafEvidenceItem('Witness evidence', 'Supporting proof',
+      ['witness', 'affidavit', 'statement']),
+  RafEvidenceItem('Photos / scene evidence', 'Supporting proof',
+      ['photo', 'picture', 'scene', 'damage', 'vehicle damage'],
+      required: false),
+  RafEvidenceItem('RAF claim form', 'RAF submission',
+      ['raf 1', 'claim form', 'raf form']),
+];
+
 class Profile {
   Profile(
       {required this.name,
@@ -90,10 +128,12 @@ class RafCase {
   final List<TimelineEvent> timeline;
 
   int get readiness {
-    var score = 20;
-    if (lawyer != null) score += 25;
-    if (documents.isNotEmpty) score += 25;
+    var score = 10;
+    score += (evidencePercent * .45).round();
+    if (lawyer != null) score += 15;
     if (messages.isNotEmpty) score += 10;
+    if (accidentDate != null && accidentDescription != null) score += 10;
+    if (patientEmail != null && patientPhone != null) score += 10;
     if (status == 'Legal review' || status == 'Submitted to RAF') score += 20;
     return score.clamp(0, 100);
   }
@@ -113,17 +153,15 @@ class RafCase {
     final names = documents.join(' ').toLowerCase();
     bool hasAny(List<String> words) => words.any(names.contains);
     return {
-      'Identity document': hasAny(['identity', ' id ', 'id.', 'passport']),
-      'Medical records':
-          hasAny(['medical', 'hospital', 'clinical', 'doctor', 'report']),
-      'Accident evidence':
-          hasAny(['accident', 'police', 'crash', 'scene', 'affidavit']),
-      'Consent or mandate':
-          hasAny(['consent', 'mandate', 'authority', 'authorisation']),
-      'Income evidence':
-          hasAny(['income', 'payslip', 'salary', 'employment', 'earnings']),
+      for (final item in rafEvidenceItems)
+        item.label: hasAny(item.keywords) ||
+            (item.label == 'Accident description / statement' &&
+                (accidentDescription ?? '').trim().isNotEmpty)
     };
   }
+
+  List<RafEvidenceItem> get requiredEvidenceItems =>
+      rafEvidenceItems.where((item) => item.required).toList();
 
   List<String> get suggestedMissingEvidence => evidenceChecklist.entries
       .where((entry) => !entry.value)
@@ -131,8 +169,18 @@ class RafCase {
       .toList();
 
   int get evidencePercent {
-    final complete = evidenceChecklist.values.where((value) => value).length;
-    return (complete / evidenceChecklist.length * 100).round();
+    final requiredItems = requiredEvidenceItems;
+    final complete = requiredItems
+        .where((item) => evidenceChecklist[item.label] == true)
+        .length;
+    return (complete / requiredItems.length * 100).round();
+  }
+
+  String get readinessLabel {
+    if (readiness >= 85) return 'Ready for RAF preparation';
+    if (readiness >= 65) return 'Almost ready';
+    if (readiness >= 40) return 'Needs key documents';
+    return 'Intake incomplete';
   }
 
   String get urgency {
@@ -145,8 +193,8 @@ class RafCase {
   }
 
   String get nextAction {
-    if (documents.isEmpty) {
-      return 'Attach accident, hospital, or medical records.';
+    if (suggestedMissingEvidence.isNotEmpty) {
+      return 'Collect ${suggestedMissingEvidence.take(2).join(' and ')}.';
     }
     if (lawyer == null) return 'Assign the best matching RAF lawyer.';
     if (messages.isEmpty) return 'Send the first case handover message.';
@@ -2909,6 +2957,11 @@ class EvidencePackAssistant extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final grouped = <String, List<RafEvidenceItem>>{};
+    for (final evidence in rafEvidenceItems) {
+      grouped.putIfAbsent(evidence.category, () => []).add(evidence);
+    }
+    final missing = store.missingEvidence(item);
     return Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -2919,38 +2972,82 @@ class EvidencePackAssistant extends StatelessWidget {
             const Icon(Icons.fact_check_outlined),
             const SizedBox(width: 8),
             const Expanded(
-                child: Text('Evidence-pack assistant',
+                child: Text('RAF readiness checklist',
                     style: TextStyle(fontWeight: FontWeight.w900))),
             Text('${store.evidenceCompletion(item)}%',
                 style: const TextStyle(fontWeight: FontWeight.w900))
           ]),
           const SizedBox(height: 6),
+          LinearProgressIndicator(
+              value: store.evidenceCompletion(item) / 100,
+              minHeight: 7,
+              borderRadius: BorderRadius.circular(99)),
+          const SizedBox(height: 8),
+          Text(item.readinessLabel,
+              style:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 3),
           const Text(
-              'Suggested review based on attached filenames—not legal advice.',
+              'Built around a physical RAF file: patient proof, accident proof, medical proof, income proof and claim forms. This is a workflow aid, not legal advice.',
               style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 10),
-          Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: item.evidenceChecklist.keys.map((label) {
-                final complete = store.evidenceComplete(item, label);
-                return FilterChip(
-                    avatar: Icon(
-                        complete
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        size: 17,
-                        color: complete ? Colors.green : Colors.orange),
-                    selected: complete,
-                    onSelected: store.profile!.role != UserRole.admin
-                        ? (selected) async {
-                            await store.setEvidenceComplete(
-                                item, label, selected);
-                            onChanged();
-                          }
-                        : null,
-                    label: Text(label, style: const TextStyle(fontSize: 11)));
-              }).toList())
+          ...grouped.entries.map((group) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(group.key,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            color: colors.primary)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: group.value.map((evidence) {
+                          final complete =
+                              store.evidenceComplete(item, evidence.label);
+                          return FilterChip(
+                              avatar: Icon(
+                                  complete
+                                      ? Icons.check_circle
+                                      : evidence.required
+                                          ? Icons.radio_button_unchecked
+                                          : Icons.add_circle_outline,
+                                  size: 17,
+                                  color: complete
+                                      ? Colors.green
+                                      : evidence.required
+                                          ? Colors.orange
+                                          : colors.primary),
+                              selected: complete,
+                              onSelected: store.profile!.role != UserRole.admin
+                                  ? (selected) async {
+                                      await store.setEvidenceComplete(
+                                          item, evidence.label, selected);
+                                      onChanged();
+                                    }
+                                  : null,
+                              label: Text(
+                                  evidence.required
+                                      ? evidence.label
+                                      : '${evidence.label} (optional)',
+                                  style: const TextStyle(fontSize: 11)));
+                        }).toList())
+                  ]))),
+          if (missing.isNotEmpty)
+            Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: colors.errorContainer.withValues(alpha: .5),
+                    borderRadius: BorderRadius.circular(14)),
+                child: Text('Next to collect: ${missing.take(3).join(', ')}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: colors.onErrorContainer)))
         ]));
   }
 }
