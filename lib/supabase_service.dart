@@ -180,7 +180,7 @@ class SupabaseService {
   }
 
   static Future<List<Map<String, dynamic>>> fetchCases() async {
-    final caseRows = await client.from('raf_cases').select('''
+    final baseSelect = '''
           id,
           patient_name,
           accident_city,
@@ -199,7 +199,47 @@ class SupabaseService {
           patient_user_id,
           created_at,
           hospital:organisations!raf_cases_hospital_id_fkey(name)
-        ''').order('created_at', ascending: false);
+        ''';
+    const accidentSelect = '''
+          id,
+          patient_name,
+          accident_city,
+          status,
+          assigned_lawyer_id,
+          assigned_lawyer_name,
+          patient_email,
+          patient_phone,
+          patient_id_number,
+          patient_date_of_birth,
+          patient_address,
+          emergency_contact_name,
+          emergency_contact_phone,
+          accident_date,
+          accident_description,
+          accident_location,
+          police_station,
+          police_case_number,
+          accident_report_number,
+          patient_accident_role,
+          hit_and_run,
+          vehicle_details,
+          witness_details,
+          patient_user_id,
+          created_at,
+          hospital:organisations!raf_cases_hospital_id_fkey(name)
+        ''';
+    List<dynamic> caseRows;
+    try {
+      caseRows = await client
+          .from('raf_cases')
+          .select(accidentSelect)
+          .order('created_at', ascending: false);
+    } catch (_) {
+      caseRows = await client
+          .from('raf_cases')
+          .select(baseSelect)
+          .order('created_at', ascending: false);
+    }
 
     final documentRows = await client
         .from('case_documents')
@@ -247,6 +287,14 @@ class SupabaseService {
     String? emergencyContactPhone,
     DateTime? accidentDate,
     String? accidentDescription,
+    String? accidentLocation,
+    String? policeStation,
+    String? policeCaseNumber,
+    String? accidentReportNumber,
+    String? patientAccidentRole,
+    bool? hitAndRun,
+    String? vehicleDetails,
+    String? witnessDetails,
     String? patientUserId,
   }) async {
     final user = client.auth.currentUser;
@@ -262,32 +310,8 @@ class SupabaseService {
     final existing =
         await client.from('raf_cases').select('id').eq('id', id).maybeSingle();
 
-    if (existing != null) {
-      await client.from('raf_cases').update({
-        'patient_name': patientName,
-        'accident_city': city,
-        'status': status,
-        'assigned_lawyer_id': lawyerId,
-        'assigned_lawyer_name': lawyerName,
-        'patient_email': patientEmail,
-        'patient_phone': patientPhone,
-        'patient_id_number': patientIdNumber,
-        'patient_date_of_birth': patientDateOfBirth?.toIso8601String(),
-        'patient_address': patientAddress,
-        'emergency_contact_name': emergencyContactName,
-        'emergency_contact_phone': emergencyContactPhone,
-        'accident_date': accidentDate?.toIso8601String(),
-        'accident_description': accidentDescription,
-        if (patientUserId != null) 'patient_user_id': patientUserId,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', id);
-      return;
-    }
-
-    await client.from('raf_cases').insert({
-      'id': id,
+    final baseValues = {
       'patient_name': patientName,
-      'hospital_id': membership['organisation_id'],
       'accident_city': city,
       'status': status,
       'assigned_lawyer_id': lawyerId,
@@ -301,9 +325,53 @@ class SupabaseService {
       'emergency_contact_phone': emergencyContactPhone,
       'accident_date': accidentDate?.toIso8601String(),
       'accident_description': accidentDescription,
-      'patient_user_id': patientUserId,
-      'created_by': user.id,
-    });
+    };
+    final accidentValues = {
+      ...baseValues,
+      'accident_location': accidentLocation,
+      'police_station': policeStation,
+      'police_case_number': policeCaseNumber,
+      'accident_report_number': accidentReportNumber,
+      'patient_accident_role': patientAccidentRole,
+      'hit_and_run': hitAndRun ?? false,
+      'vehicle_details': vehicleDetails,
+      'witness_details': witnessDetails,
+    };
+
+    if (existing != null) {
+      try {
+        await client.from('raf_cases').update({
+          ...accidentValues,
+          if (patientUserId != null) 'patient_user_id': patientUserId,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', id);
+      } catch (_) {
+        await client.from('raf_cases').update({
+          ...baseValues,
+          if (patientUserId != null) 'patient_user_id': patientUserId,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', id);
+      }
+      return;
+    }
+
+    try {
+      await client.from('raf_cases').insert({
+        'id': id,
+        'hospital_id': membership['organisation_id'],
+        ...accidentValues,
+        'patient_user_id': patientUserId,
+        'created_by': user.id,
+      });
+    } catch (_) {
+      await client.from('raf_cases').insert({
+        'id': id,
+        'hospital_id': membership['organisation_id'],
+        ...baseValues,
+        'patient_user_id': patientUserId,
+        'created_by': user.id,
+      });
+    }
   }
 
   static Future<void> sendMessage({

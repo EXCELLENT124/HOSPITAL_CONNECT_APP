@@ -102,6 +102,14 @@ class RafCase {
       this.emergencyContactPhone,
       this.accidentDate,
       this.accidentDescription,
+      this.accidentLocation,
+      this.policeStation,
+      this.policeCaseNumber,
+      this.accidentReportNumber,
+      this.patientAccidentRole,
+      this.hitAndRun = false,
+      this.vehicleDetails,
+      this.witnessDetails,
       List<String>? documents,
       List<ChatMessage>? messages,
       List<TimelineEvent>? timeline})
@@ -122,6 +130,14 @@ class RafCase {
   String? emergencyContactPhone;
   DateTime? accidentDate;
   String? accidentDescription;
+  String? accidentLocation;
+  String? policeStation;
+  String? policeCaseNumber;
+  String? accidentReportNumber;
+  String? patientAccidentRole;
+  bool hitAndRun;
+  String? vehicleDetails;
+  String? witnessDetails;
   final DateTime created;
   final List<String> documents;
   final List<ChatMessage> messages;
@@ -221,6 +237,14 @@ class RafCase {
         'emergencyContactPhone': emergencyContactPhone,
         'accidentDate': accidentDate?.toIso8601String(),
         'accidentDescription': accidentDescription,
+        'accidentLocation': accidentLocation,
+        'policeStation': policeStation,
+        'policeCaseNumber': policeCaseNumber,
+        'accidentReportNumber': accidentReportNumber,
+        'patientAccidentRole': patientAccidentRole,
+        'hitAndRun': hitAndRun,
+        'vehicleDetails': vehicleDetails,
+        'witnessDetails': witnessDetails,
         'created': created.toIso8601String(),
         'documents': documents,
         'messages': messages.map((e) => e.toJson()).toList(),
@@ -246,6 +270,14 @@ class RafCase {
       accidentDate:
           j['accidentDate'] == null ? null : DateTime.parse(j['accidentDate']),
       accidentDescription: j['accidentDescription'],
+      accidentLocation: j['accidentLocation'],
+      policeStation: j['policeStation'],
+      policeCaseNumber: j['policeCaseNumber'],
+      accidentReportNumber: j['accidentReportNumber'],
+      patientAccidentRole: j['patientAccidentRole'],
+      hitAndRun: j['hitAndRun'] ?? false,
+      vehicleDetails: j['vehicleDetails'],
+      witnessDetails: j['witnessDetails'],
       created: DateTime.parse(j['created']),
       documents: List<String>.from(j['documents'] ?? []),
       messages: (j['messages'] as List? ?? [])
@@ -516,6 +548,14 @@ class AppStore extends ChangeNotifier {
           emergencyContactPhone: value.emergencyContactPhone,
           accidentDate: value.accidentDate,
           accidentDescription: value.accidentDescription,
+          accidentLocation: value.accidentLocation,
+          policeStation: value.policeStation,
+          policeCaseNumber: value.policeCaseNumber,
+          accidentReportNumber: value.accidentReportNumber,
+          patientAccidentRole: value.patientAccidentRole,
+          hitAndRun: value.hitAndRun,
+          vehicleDetails: value.vehicleDetails,
+          witnessDetails: value.witnessDetails,
           patientUserId: patientUserId);
       await loadRemote(roleFallback: profile!.role);
     }
@@ -543,7 +583,15 @@ class AppStore extends ChangeNotifier {
           emergencyContactName: value.emergencyContactName,
           emergencyContactPhone: value.emergencyContactPhone,
           accidentDate: value.accidentDate,
-          accidentDescription: value.accidentDescription);
+          accidentDescription: value.accidentDescription,
+          accidentLocation: value.accidentLocation,
+          policeStation: value.policeStation,
+          policeCaseNumber: value.policeCaseNumber,
+          accidentReportNumber: value.accidentReportNumber,
+          patientAccidentRole: value.patientAccidentRole,
+          hitAndRun: value.hitAndRun,
+          vehicleDetails: value.vehicleDetails,
+          witnessDetails: value.witnessDetails);
       if (notice.toLowerCase().contains('assigned')) {
         await SupabaseService.notifyCase(
             caseId: value.id,
@@ -710,6 +758,14 @@ class AppStore extends ChangeNotifier {
               ? null
               : DateTime.parse(row['accident_date'] as String),
           accidentDescription: row['accident_description'] as String?,
+          accidentLocation: row['accident_location'] as String?,
+          policeStation: row['police_station'] as String?,
+          policeCaseNumber: row['police_case_number'] as String?,
+          accidentReportNumber: row['accident_report_number'] as String?,
+          patientAccidentRole: row['patient_accident_role'] as String?,
+          hitAndRun: row['hit_and_run'] as bool? ?? false,
+          vehicleDetails: row['vehicle_details'] as String?,
+          witnessDetails: row['witness_details'] as String?,
           created: created,
           documents: documents,
           messages: messages,
@@ -3538,6 +3594,10 @@ class PatientDetailsPanel extends StatelessWidget {
                   item.patientIdNumber ?? 'No ID / passport'),
               DetailPill(Icons.cake_outlined, _date(item.patientDateOfBirth)),
               DetailPill(Icons.event_outlined, _date(item.accidentDate)),
+              DetailPill(Icons.person_pin_circle_outlined,
+                  item.patientAccidentRole ?? 'No accident role'),
+              DetailPill(Icons.report_problem_outlined,
+                  item.hitAndRun ? 'Hit-and-run' : 'Identified vehicle'),
             ]),
             if ((item.patientAddress ?? '').isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -3552,6 +3612,30 @@ class PatientDetailsPanel extends StatelessWidget {
             if ((item.accidentDescription ?? '').isNotEmpty) ...[
               const SizedBox(height: 6),
               Text('Accident notes: ${item.accidentDescription}')
+            ],
+            if ((item.accidentLocation ?? '').isNotEmpty ||
+                (item.policeStation ?? '').isNotEmpty ||
+                (item.policeCaseNumber ?? '').isNotEmpty ||
+                (item.accidentReportNumber ?? '').isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('Accident report',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+              if ((item.accidentLocation ?? '').isNotEmpty)
+                Text('Location: ${item.accidentLocation}'),
+              if ((item.policeStation ?? '').isNotEmpty)
+                Text('Police station: ${item.policeStation}'),
+              if ((item.policeCaseNumber ?? '').isNotEmpty)
+                Text('Police case number: ${item.policeCaseNumber}'),
+              if ((item.accidentReportNumber ?? '').isNotEmpty)
+                Text('Accident report number: ${item.accidentReportNumber}'),
+            ],
+            if ((item.vehicleDetails ?? '').isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('Vehicle / driver details: ${item.vehicleDetails}')
+            ],
+            if ((item.witnessDetails ?? '').isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('Witness details: ${item.witnessDetails}')
             ],
           ])));
 
@@ -3631,9 +3715,17 @@ class _CaseFormPageState extends State<CaseFormPage> {
   final emergencyName = TextEditingController();
   final emergencyPhone = TextEditingController();
   final city = TextEditingController();
+  final accidentLocation = TextEditingController();
+  final policeStation = TextEditingController();
+  final policeCaseNumber = TextEditingController();
+  final accidentReportNumber = TextEditingController();
+  final vehicleDetails = TextEditingController();
+  final witnessDetails = TextEditingController();
   final accidentDescription = TextEditingController();
   DateTime? patientDob;
   DateTime? accidentDate;
+  String patientAccidentRole = 'Passenger';
+  bool hitAndRun = false;
   bool recommend = true;
   bool saving = false;
   bool showPatientPassword = false;
@@ -3657,6 +3749,14 @@ class _CaseFormPageState extends State<CaseFormPage> {
     emergencyName.text = item.emergencyContactName ?? '';
     emergencyPhone.text = item.emergencyContactPhone ?? '';
     city.text = item.city;
+    accidentLocation.text = item.accidentLocation ?? '';
+    policeStation.text = item.policeStation ?? '';
+    policeCaseNumber.text = item.policeCaseNumber ?? '';
+    accidentReportNumber.text = item.accidentReportNumber ?? '';
+    patientAccidentRole = item.patientAccidentRole ?? 'Passenger';
+    hitAndRun = item.hitAndRun;
+    vehicleDetails.text = item.vehicleDetails ?? '';
+    witnessDetails.text = item.witnessDetails ?? '';
     accidentDescription.text = item.accidentDescription ?? '';
     patientDob = item.patientDateOfBirth;
     accidentDate = item.accidentDate;
@@ -3674,6 +3774,12 @@ class _CaseFormPageState extends State<CaseFormPage> {
     emergencyName.dispose();
     emergencyPhone.dispose();
     city.dispose();
+    accidentLocation.dispose();
+    policeStation.dispose();
+    policeCaseNumber.dispose();
+    accidentReportNumber.dispose();
+    vehicleDetails.dispose();
+    witnessDetails.dispose();
     accidentDescription.dispose();
     super.dispose();
   }
@@ -3787,7 +3893,14 @@ class _CaseFormPageState extends State<CaseFormPage> {
                                       controller: city,
                                       decoration: const InputDecoration(
                                           labelText:
-                                              'Accident city / location'),
+                                              'Accident city / province'),
+                                      validator: required)),
+                              FormBox(
+                                  child: TextFormField(
+                                      controller: accidentLocation,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Exact accident location / road'),
                                       validator: required)),
                               FormBox(
                                   child: DatePickerTile(
@@ -3795,6 +3908,91 @@ class _CaseFormPageState extends State<CaseFormPage> {
                                       value: accidentDate,
                                       onChanged: (value) => setState(
                                           () => accidentDate = value))),
+                              FormBox(
+                                  child: DropdownButtonFormField<String>(
+                                      value: patientAccidentRole,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Patient role in accident'),
+                                      items: const [
+                                        DropdownMenuItem(
+                                            value: 'Driver',
+                                            child: Text('Driver')),
+                                        DropdownMenuItem(
+                                            value: 'Passenger',
+                                            child: Text('Passenger')),
+                                        DropdownMenuItem(
+                                            value: 'Pedestrian',
+                                            child: Text('Pedestrian')),
+                                        DropdownMenuItem(
+                                            value: 'Cyclist',
+                                            child: Text('Cyclist')),
+                                        DropdownMenuItem(
+                                            value: 'Motorcyclist',
+                                            child: Text('Motorcyclist')),
+                                        DropdownMenuItem(
+                                            value: 'Other',
+                                            child: Text('Other')),
+                                      ],
+                                      onChanged: (value) => setState(() =>
+                                          patientAccidentRole =
+                                              value ?? 'Passenger'))),
+                              FormBox(
+                                  child: SwitchListTile(
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 12),
+                                      value: hitAndRun,
+                                      onChanged: (value) =>
+                                          setState(() => hitAndRun = value),
+                                      title: const Text('Hit-and-run matter'),
+                                      subtitle: const Text(
+                                          'Turn on if the vehicle/driver is unknown.'))),
+                            ]),
+                            const SectionTitle('Police / accident report'),
+                            Wrap(runSpacing: 12, spacing: 12, children: [
+                              FormBox(
+                                  child: TextFormField(
+                                      controller: policeStation,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Police station reported to'),
+                                      validator: required)),
+                              FormBox(
+                                  child: TextFormField(
+                                      controller: policeCaseNumber,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Police case number'),
+                                      validator: required)),
+                              FormBox(
+                                  child: TextFormField(
+                                      controller: accidentReportNumber,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Accident report number / AR number'))),
+                              FormBox(
+                                  wide: true,
+                                  child: TextFormField(
+                                      controller: vehicleDetails,
+                                      minLines: 2,
+                                      maxLines: 4,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Vehicle / driver details',
+                                          hintText:
+                                              'Registration numbers, known drivers, owner details, insurer, or unknown for hit-and-run'),
+                                      validator: required)),
+                              FormBox(
+                                  wide: true,
+                                  child: TextFormField(
+                                      controller: witnessDetails,
+                                      minLines: 2,
+                                      maxLines: 4,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Witness details / statements',
+                                          hintText:
+                                              'Names, phone numbers, short witness notes, or write none'))),
                               FormBox(
                                   wide: true,
                                   child: TextFormField(
@@ -3880,6 +4078,14 @@ class _CaseFormPageState extends State<CaseFormPage> {
             emergencyContactName: emergencyName.text.trim(),
             emergencyContactPhone: emergencyPhone.text.trim(),
             accidentDate: accidentDate,
+            accidentLocation: accidentLocation.text.trim(),
+            policeStation: policeStation.text.trim(),
+            policeCaseNumber: policeCaseNumber.text.trim(),
+            accidentReportNumber: accidentReportNumber.text.trim(),
+            patientAccidentRole: patientAccidentRole,
+            hitAndRun: hitAndRun,
+            vehicleDetails: vehicleDetails.text.trim(),
+            witnessDetails: witnessDetails.text.trim(),
             accidentDescription: accidentDescription.text.trim());
         await widget.store.addCase(item,
             patientPassword: patientPassword.text.trim());
@@ -3894,6 +4100,14 @@ class _CaseFormPageState extends State<CaseFormPage> {
         existing.emergencyContactPhone = emergencyPhone.text.trim();
         existing.city = city.text.trim();
         existing.accidentDate = accidentDate;
+        existing.accidentLocation = accidentLocation.text.trim();
+        existing.policeStation = policeStation.text.trim();
+        existing.policeCaseNumber = policeCaseNumber.text.trim();
+        existing.accidentReportNumber = accidentReportNumber.text.trim();
+        existing.patientAccidentRole = patientAccidentRole;
+        existing.hitAndRun = hitAndRun;
+        existing.vehicleDetails = vehicleDetails.text.trim();
+        existing.witnessDetails = witnessDetails.text.trim();
         existing.accidentDescription = accidentDescription.text.trim();
         await widget.store
             .updateCase(existing, 'Patient details updated for ${existing.id}');
