@@ -156,10 +156,59 @@ class RafCase {
 
   int get daysOpen => DateTime.now().difference(created).inDays.clamp(0, 9999);
 
+  DateTime? get rafLodgementDeadline {
+    final date = accidentDate;
+    if (date == null) return null;
+    return _addYears(date, hitAndRun ? 2 : 3);
+  }
+
+  int? get daysToRafDeadline {
+    final deadline = rafLodgementDeadline;
+    if (deadline == null) return null;
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    return deadline.difference(startOfToday).inDays;
+  }
+
+  String get rafDeadlineType =>
+      hitAndRun ? 'Hit-and-run / unidentified vehicle' : 'Identified vehicle';
+
+  String get rafDeadlineLabel {
+    final deadline = rafLodgementDeadline;
+    if (deadline == null) return 'No accident date captured';
+    final days = daysToRafDeadline ?? 0;
+    final date = _dateLabel(deadline);
+    if (status == 'Submitted to RAF') return 'Submitted to RAF';
+    if (days < 0) return 'Possible prescription risk since $date';
+    if (days == 0) return 'RAF lodgement deadline is today';
+    if (days <= 30) return '$days days left to lodge RAF claim';
+    if (days <= 90) return '$days days left — prepare urgently';
+    return 'Deadline: $date';
+  }
+
+  String get rafDeadlineRisk {
+    if (status == 'Submitted to RAF') return 'Filed';
+    final days = daysToRafDeadline;
+    if (days == null) return 'Missing accident date';
+    if (days < 0) return 'Expired risk';
+    if (days <= 30) return 'Critical';
+    if (days <= 90) return 'Urgent';
+    if (days <= 180) return 'Watch';
+    return 'Safe';
+  }
+
+  bool get rafDeadlineNeedsAttention =>
+      rafDeadlineRisk == 'Expired risk' ||
+      rafDeadlineRisk == 'Critical' ||
+      rafDeadlineRisk == 'Urgent';
+
   int get attentionScore {
     if (status == 'Submitted to RAF') return 0;
     var score = 100 - readiness;
     score += daysOpen.clamp(0, 30);
+    if (rafDeadlineRisk == 'Expired risk') score += 40;
+    if (rafDeadlineRisk == 'Critical') score += 30;
+    if (rafDeadlineRisk == 'Urgent') score += 20;
     if (lawyer == null) score += 20;
     if (documents.isEmpty) score += 15;
     return score.clamp(0, 100);
@@ -202,6 +251,9 @@ class RafCase {
   String get urgency {
     final age = DateTime.now().difference(created).inDays;
     if (status == 'Submitted to RAF') return 'Filed';
+    if (rafDeadlineRisk == 'Expired risk') return 'Prescription risk';
+    if (rafDeadlineRisk == 'Critical') return 'Deadline critical';
+    if (rafDeadlineRisk == 'Urgent') return 'Deadline urgent';
     if (lawyer == null && age >= 2) return 'High attention';
     if (documents.isEmpty) return 'Needs records';
     if (lawyer == null) return 'Needs lawyer';
@@ -212,6 +264,7 @@ class RafCase {
     if (suggestedMissingEvidence.isNotEmpty) {
       return 'Collect ${suggestedMissingEvidence.take(2).join(' and ')}.';
     }
+    if (rafDeadlineNeedsAttention) return rafDeadlineLabel;
     if (lawyer == null) return 'Assign the best matching RAF lawyer.';
     if (messages.isEmpty) return 'Send the first case handover message.';
     if (status != 'Submitted to RAF') {
@@ -250,6 +303,16 @@ class RafCase {
         'messages': messages.map((e) => e.toJson()).toList(),
         'timeline': timeline.map((e) => e.toJson()).toList()
       };
+
+  static DateTime _addYears(DateTime value, int years) {
+    final targetYear = value.year + years;
+    final lastDayOfMonth = DateTime(targetYear, value.month + 1, 0).day;
+    final day = value.day > lastDayOfMonth ? lastDayOfMonth : value.day;
+    return DateTime(targetYear, value.month, day);
+  }
+
+  static String _dateLabel(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
   factory RafCase.fromJson(Map<String, dynamic> j) => RafCase(
       id: j['id'],
       patient: j['patient'],
@@ -639,6 +702,10 @@ class AppStore extends ChangeNotifier {
   void _refreshDueNotifications() {
     for (final item in cases.where(followUpOverdue)) {
       final message = 'Follow-up overdue for ${item.id}';
+      if (!notices.contains(message)) notices.insert(0, message);
+    }
+    for (final item in cases.where((item) => item.rafDeadlineNeedsAttention)) {
+      final message = '${item.id}: ${item.rafDeadlineLabel}';
       if (!notices.contains(message)) notices.insert(0, message);
     }
   }
@@ -2249,7 +2316,8 @@ class CaseCard extends StatelessWidget {
                                       fontWeight: FontWeight.w800))),
                           Text('${item.readiness}% ready',
                               style: const TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.w700))
+                                  fontSize: 11, fontWeight: FontWeight.w700)),
+                          DeadlineChip(item)
                         ])
                       ])),
                   Flexible(
@@ -2269,12 +2337,89 @@ class CaseCard extends StatelessWidget {
   }
 
   static Color _urgencyColor(String urgency) => switch (urgency) {
+        'Prescription risk' => Colors.red.shade900,
+        'Deadline critical' => Colors.red,
+        'Deadline urgent' => Colors.deepOrange,
         'High attention' => Colors.red,
         'Needs records' => Colors.orange,
         'Needs lawyer' => Colors.amber.shade800,
         'Filed' => Colors.blue,
         _ => Colors.green,
       };
+}
+
+class DeadlineChip extends StatelessWidget {
+  const DeadlineChip(this.item, {super.key});
+  final RafCase item;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = deadlineColor(item.rafDeadlineRisk);
+    return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: .35))),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.timer_outlined, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(item.rafDeadlineRisk,
+              style: TextStyle(
+                  color: color, fontSize: 11, fontWeight: FontWeight.w800))
+        ]));
+  }
+
+  static Color deadlineColor(String risk) => switch (risk) {
+        'Expired risk' => Colors.red.shade900,
+        'Critical' => Colors.red,
+        'Urgent' => Colors.deepOrange,
+        'Watch' => Colors.orange,
+        'Filed' => Colors.blue,
+        'Missing accident date' => Colors.grey,
+        _ => Colors.green,
+      };
+}
+
+class DeadlineBanner extends StatelessWidget {
+  const DeadlineBanner(this.item, {super.key});
+  final RafCase item;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = DeadlineChip.deadlineColor(item.rafDeadlineRisk);
+    final deadline = item.rafLodgementDeadline;
+    return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withValues(alpha: .35))),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.event_busy_outlined, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text('RAF deadline monitor',
+                    style: TextStyle(
+                        color: color, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                Text(item.rafDeadlineLabel,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(
+                    '${item.rafDeadlineType}${deadline == null ? '' : ' • calculated from accident date'}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 6),
+                const Text(
+                    'Reminder only: verify prescription and lodgement rules with the responsible attorney before relying on this date.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey))
+              ]))
+        ]));
+  }
 }
 
 class CaseDetails extends StatefulWidget {
@@ -2305,6 +2450,8 @@ class _CaseDetailsState extends State<CaseDetails> {
                     children: [
                   Text(
                       '${widget.item.id} · ${widget.item.hospital} · ${widget.item.city}'),
+                  const SizedBox(height: 18),
+                  DeadlineBanner(widget.item),
                   const SizedBox(height: 18),
                   if (widget.store.profile!.role == UserRole.hospital) ...[
                     OutlinedButton.icon(
